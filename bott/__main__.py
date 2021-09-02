@@ -97,6 +97,12 @@ class TnVariety:
 class CobordismClass:
     """
     A cobordism class represented by the dimension and the Chern numbers.
+
+    EXAMPLES::
+
+        sage: from bott import CobordismClass
+        sage: CobordismClass(2, {Partition([2]): 24})
+        Cobordism Class of dim 2
     """
     def __init__(self, n, chern_numbers, check=True):
         self.dim = n
