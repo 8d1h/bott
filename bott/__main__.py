@@ -1,15 +1,3 @@
-# from functools import reduce
-# from itertools import product
-
-# from sage.symbolic.all import SR
-# from sage.rings.all import QQ
-# from sage.rings.polynomial.all import PolynomialRing, TermOrder
-# from sage.matrix.all import matrix
-# from sage.modules.all import vector
-# from sage.combinat.all import Combinations, Partition, Partitions
-# from sage.misc.all import gens, cached_function, prod
-# from sage.parallel.all import parallel
-
 from sage.all import *
 
 from .utils import chern
@@ -150,6 +138,19 @@ class CobordismClass:
             raise ValueError(str(p) + " is not a partition of " + str(self.dim))
         return self.__cn[p]
 
+    def integral(self, c):
+        """
+        Compute the integral of a polynomial in Chern classes.
+        """
+        ans = 0
+        monoms, coeffs = c.monomials(), c.coefficients()
+        for i in range(len(monoms)):
+            if monoms[i].degree() == self.dim:
+                d = monoms[i].exponents()[0]
+                p = Partition([i+1 for i in range(self.dim-1,-1,-1) for j in range(d[i])])
+                ans += coeffs[i] * self.__cn[p]
+        return ans
+
     def __mul__(self, other):
         """
         Return the product of two `CobordismClass`.
@@ -268,8 +269,10 @@ def by_degree(x, n):
     if x.parent().ngens() == 1:
         g = x.parent().gen()
         l = x.list()
+        l += [0] * (n+1-len(l))
         for i in range(max(n, len(l))):
             c[i] = l[i] * g**i
+        return c
     monoms, coeffs = x.monomials(), x.coefficients()
     for i in range(len(monoms)):
         d = monoms[i].degree() 
@@ -287,6 +290,13 @@ def capped_log(x, n):
         p[i+1] = (i+2) * e[i+2] - sum(e[j+1] * p[i-j] for j in range(i+1))
     return sum(QQ((1, i+1))*p[i] for i in range(n))
 
+def capped_logg(x, n):
+    e = by_degree(x, n)
+    p = [-e[1]] + [0] * (n-1)
+    for i in range(n-1):
+        p[i+1] = -(i+2) * e[i+2] - sum(e[j+1] * p[i-j] for j in range(i+1))
+    return sum(QQ(((-1)**(i+1), factorial(i+1)))*p[i] for i in range(n))
+
 def capped_exp(x, n):
     comps = by_degree(x, n)
     p = [i * comps[i] for i in range(n+1)]
@@ -294,6 +304,35 @@ def capped_exp(x, n):
     for i in range(n):
         e[i+1] = QQ((1, i+1)) * sum(p[j+1] * e[i-j] for j in range(i+1))
     return sum(e)
+
+def capped_sqrt(x, n):
+    return capped_exp(capped_log(x, n)/2, n)
+
+# streamline multithreaded computation of Chern numbers
+# `x` is a polynomial
+# `classes` specifies the cobordism classes each variable represents
+def compute_sum(x, dim, classes, check = lambda _: True):
+    N = parent(x).ngens()
+    @parallel(Nthreads.n)
+    def compute(terms):
+        ans = {p: 0 for p in partitions}
+        for (monom, coeff) in terms:
+            if check(monom.degree()):
+                d = monom.exponents()[0]
+                c = prod([classes[k] for k in range(N) for _ in range(d[k])])
+                for p in partitions:
+                    ans[p] += coeff * c.chern_number(p)
+        return ans
+    terms = list(zip(x.monomials(), x.coefficients()))
+    partitions = Partitions(dim)
+    each = max(len(terms) // Nthreads.n, 10)
+    num = len(terms) // each
+    c = compute([terms[i*each:(i+1)*each] for i in range(num)] + [terms[num*each:]])
+    ans = {p: 0 for p in partitions}
+    for (_, ci) in c:
+        for p in partitions:
+            ans[p] += ci[p]
+    return ans
 
 def hilb_K3(n):
     """
@@ -333,21 +372,127 @@ def hilb_surface(n, c1c1, c2, parent=QQ):
         {[4]: 1/2*b^2 + 3/2*b, [3, 1]: a*b + 3*a, [2, 2]: 1/2*a^2 + b^2 + a + 21/2*b, [2, 1, 1]: a^2 + a*b + 6*a, [1, 1, 1, 1]: 3*a^2}
     """
     a, b = matrix([[9,8],[3,4]]).solve_right(vector([c1c1, c2]))
-    S = PolynomialRing(parent, ["a"+str(i+1) for i in range(n)]+["b"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple([i for i in range(1,n+1)]+[i for i in range(1,n+1)])))
+    S = PowerSeriesRing(parent, ["a"+str(i+1) for i in range(n)]+["b"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))+tuple(range(1,n+1))), default_prec=n+1)
     A, B = gens(S)[:n], gens(S)[n:]
-    HS = capped_exp(a*capped_log(1+sum(A), n)+b*capped_log(1+sum(B), n), n)
-    monoms, coeffs = HS.monomials(), HS.coefficients()
-    ans = {p: 0 for p in Partitions(2*n)}
+    HS = S(exp(a*log(1+sum(A))+b*log(1+sum(B)))).polynomial()
     P2n    = [hilb_P2(k+1).cobordism_class()    for k in range(n)]
     P1xP1n = [hilb_P1xP1(k+1).cobordism_class() for k in range(n)]
-    for i in range(len(monoms)):
-        if monoms[i].degree() == n:
-            d = monoms[i].exponents()[0]
-            c = prod([P2n[k] for k in range(n) for i in range(d[k])] + [P1xP1n[k] for k in range(n) for i in range(d[k+n])])
-            for p in ans.keys():
-                ans[p] += coeffs[i] * c.chern_number(p)
+    ans = compute_sum(HS, 2*n, P2n+P1xP1n, check=lambda d: d == n)
     # in case one works in the Symbolic Ring
     if parent == SR:
         for p in ans.keys():
             ans[p] = ans[p].expand().simplify()
     return CobordismClass(2*n, ans)
+
+def genus(x, taylor, n, twist=0):
+    S = PowerSeriesRing(taylor[0].parent(), "t", default_prec=n+1)
+    t = S.gen()
+    lg = log(sum(taylor[i] * t**i for i in range(n+1))).list()
+    lg = lg + [0] * (n+1-len(lg))
+    comps = by_degree(x, n)
+    c1 = x.parent().gens()[0] # assuming that the first gen is c1
+    g = capped_exp(sum(factorial(i)*lg[i]*comps[i] for i in range(n+1)) + twist*c1, n)
+    return g
+
+def _taylor(phi, n):
+    if n == 0:
+        return [phi[0]]
+    ans = _taylor(phi, n-1) + [0]
+    S = PolynomialRing(phi[0].parent(), "h")
+    chTP = S([n]+[QQ((n+1, factorial(i))) for i in range(1,n+1)])
+    x = by_degree(genus(chTP, ans, n), n)[n]
+    x = 0 if x == 0 else x.coefficients()[0]
+    ans[n] = QQ((1, n+1)) * (phi[n] - x)
+    return ans
+
+def universal_genus(n, images=None, twist=0):
+    """
+    The universal genus is a polynomial in Chern classes with coefficients in
+    the cobordism ring. Elements of the cobordism ring are represented as
+    polynomials where each variable stands for the class of a projective space.
+
+    EXAMPLES::
+
+        sage: from bott import universal_genus
+        sage: universal_genus(2)
+        (-1/4*P1^2 + 1/3*P2)*c1^2 + (3/4*P1^2 - 2/3*P2)*c2 + 1/2*P1*c1 + 1
+
+    The universality means every genus can be deduced from this: for a given genus
+    whose images of the first n projective spaces are known, one can compute
+    its total class as a polynomial in Chern classes. For example, the Todd
+    genus can be obtained using a list of ones.
+    
+    EXAMPLES::
+
+        sage: universal_genus(3, [QQ(1)]*3)
+        1/24*c1*c2 + 1/12*c1^2 + 1/12*c2 + 1/2*c1 + 1
+    """
+    if images == None:
+        S = PolynomialRing(QQ, ["P"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
+        images = [S(1)] + list(S.gens())
+    else:
+        S = images[0].parent()
+        images = [S(1)] + images
+    R = PolynomialRing(S, ["c"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
+    g = genus(capped_logg(sum(R.gens()), n), _taylor(images, n), n, twist=twist)
+    return g
+
+def todd(n):
+    """
+    Compute the Todd genus as a polynomial in Chern classes.
+
+    EXAMPLES::
+
+        sage: from bott import todd
+        sage: todd(3)
+        1/24*c1*c2 + 1/12*c1^2 + 1/12*c2 + 1/2*c1 + 1
+    """
+    return universal_genus(n, [QQ(1)]*n)
+
+def sqrt_todd(n):
+    """
+    Compute the square root of the Todd genus as a polynomial in Chern
+    classes.
+
+    EXAMPLES::
+    
+        sage: from bott import hilb_K3, sqrt_todd
+        sage: sqrt_todd(2)
+        1/96*c1^2 + 1/24*c2 + 1/4*c1 + 1
+        sage: hilb_K3(2).integral(sqrt_todd(4))
+        25/32
+    """
+    return capped_sqrt(todd(n), n)
+
+def chern_character(n):
+    """
+    Compute the Chern character as a polynomial in Chern classes.
+
+    EXAMPLES::
+
+        sage: from bott import chern_character
+        sage: chern_character(3)
+        1/6*c1^3 - 1/2*c1*c2 + 1/2*c3 + 1/2*c1^2 - c2 + c1 + 3
+    """
+    R = PolynomialRing(QQ, ["c"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
+    return n + capped_logg(sum(R.gens()), n)
+
+def kummer(n):
+    """
+    Compute the Chern numbers of the generalized Kummer variety of dimension
+    2n. Return a `CobordismClass` object.
+
+    EXAMPLES::
+
+        sage: from bott import kummer
+        sage: X = kummer(3)
+        sage: print(X.chern_numbers())
+        {[6]: 448, [4, 2]: 6784, [2, 2, 2]: 30208}
+    """
+    P2n = [hilb_P2(k+1).cobordism_class() for k in range(n+1)]
+    g = universal_genus(2*(n+1), twist=1)
+    z = PowerSeriesRing(g.parent(), "z", default_prec=n+2).gen()
+    g = by_degree(g, 2*(n+1))
+    K = QQ((2*(n+1)**2, 9)) * by_degree(by_degree(log(1+sum(P2n[k].integral(g[2*(k+1)]) * z**(k+1) for k in range(0, n+1))), n+1)[n+1].coefficients()[0].coefficients()[0], 2*n)[2*n]
+    PP = [Pn(k+1).cobordism_class() for k in range(2*n)]
+    return CobordismClass(2*n, compute_sum(K, 2*n, PP))
