@@ -157,6 +157,42 @@ class CobordismClass:
                 ans += coeffs[i] * self.__cn[p]
         return ans
 
+    def chern_characters(self, nonzero=True):
+        """
+        Return a dictionary of Chern numbers in Chern characters. Only
+        non-zero ones are shown by default.
+
+        EXAMPLES::
+
+            sage: from bott import hilb_K3
+            sage: hilb_K3(1).chern_characters()
+            {[2]: -24}
+        """
+        ans = {}
+        ch = by_degree(chern_character(self.dim), self.dim)
+        for p in Partitions(self.dim):
+            ans[p] = self.integral(prod(ch[k] for k in p))
+        if nonzero:
+            return {p: v for (p, v) in ans.items() if v != 0}
+        return ans
+    
+    def chern_character(self, p):
+        """
+        Return a single Chern number in Chern characters.
+
+        EXAMPLES::
+
+            sage: from bott import hilb_K3
+            sage: hilb_K3(2).chern_character([4])
+            15
+        """
+        if type(p) == list:
+            p = Partition(p)
+        if p.size() != self.dim:
+            raise ValueError(str(p) + " is not a partition of " + str(self.dim))
+        ch = by_degree(chern_character(self.dim), self.dim)
+        return self.integral(prod(ch[k] for k in p))
+
     def __mul__(self, other):
         """
         Return the product of two `CobordismClass`.
