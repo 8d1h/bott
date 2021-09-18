@@ -16,21 +16,26 @@ class TnVariety:
     """
     A variety with a torus action for computing with Bott's formula.
     """
-    def __init__(self, n, points, weight):
+    def __init__(self, n, points):
         self.dim = n
-        self.__points = points
-        self.__weight = weight
+        self.points = points
+
+    def tangent_bundle(self):
+        return self.T
+
+    def cotangent_bundle(self):
+        return self.T.dual()
 
     def fixed_points(self):
         """
         Return the list of fixed points of the torus action.
         """
-        return list(self.__points)
+        return list(self.points)
 
     def chern_numbers(self):
         """
         Compute a dictionary of Chern numbers using Bott's formula.
-        
+
         The computation is carried out with multithreading to improve the
         performance. The number of threads can be configured using
         `nthreads(n)`.
@@ -41,26 +46,7 @@ class TnVariety:
             sage: print(Pn(2).chern_numbers())
             {[2]: 3, [1, 1]: 9}
         """
-        @parallel(Nthreads.n)
-        def compute(points):
-            ans = {p: 0 for p in partitions}
-            for pt in points:
-                w = self.__weight(pt)
-                cherns = [1] + [chern(k, w) for k in range(1, len(w)+1)]
-                ctop = cherns[-1]
-                for p in ans.keys():
-                    ans[p] += prod(cherns[k] for k in p) * QQ((1, ctop))
-            return ans
-
-        partitions = Partitions(self.dim)
-        each = max(len(self.__points) // Nthreads.n, 10)
-        num = len(self.__points) // each
-        c = compute([self.__points[i*each:(i+1)*each] for i in range(num)] + [self.__points[num*each:]])
-        ans = {p: 0 for p in partitions}
-        for (_, ci) in c:
-            for p in ans.keys():
-                ans[p] += ci[p]
-        return ans
+        return self.T.integrals(Partitions(self.dim))
 
     def cobordism_class(self):
         """
@@ -73,6 +59,67 @@ class TnVariety:
             Cobordism Class of dim 2
         """
         return CobordismClass(self.dim, self.chern_numbers(), check=False)
+
+    def O(self, n=0):
+        """
+        Return the line bundle O(n) as a TnBundle (if it is defined).
+
+        EXAMPLES::
+
+            sage: from bott import Pn
+            sage: Pn(3).O(1)
+            TnBundle of rank 1 on TnVariety of dim 3
+        """
+        if n == 0:
+            return TnBundle(self, 1, lambda p: [0])
+        if not hasattr(self, "O1"):
+            raise ValueError("No polarization defined")
+        return TnBundle(self, 1, lambda p: [n * self.O1.weight(p)[0]])
+
+    def integrals(self, Fs, c):
+        # a list of bundles Fs and a polynomial in Chern classes
+        partitions = {}
+        for monom in c.monomials():
+            if monom.degree() == self.dim:
+                d = monom.exponents()[0]
+                if c.parent().ngens() == 1:
+                    d = [d]
+                pp = []
+                k = 0
+                for F in Fs:
+                    pp.append(Partition([i+1 for i in range(F.rank-1,-1,-1) for j in range(d[k+i])]))
+                    k += F.rank
+                partitions[tuple(pp)] = c.monomial_coefficient(monom)
+        ans = self.__integrals(Fs, partitions.keys())
+        return sum(a * ans[p] for (p, a) in partitions.items())
+
+    def __integrals(self, Fs, partitions):
+        idx = [set() for _ in Fs]
+        for p in partitions:
+            for i in range(len(Fs)):
+                idx[i] = idx[i].union(set(p[i]))
+
+        @parallel(Nthreads.n)
+        def compute(points):
+            ans = {p:0 for p in partitions}
+            for pt in points:
+                cs = [[] for _ in range(len(Fs))]
+                for i in range(len(Fs)):
+                    w = Fs[i].weight(pt)
+                    cs[i] = [1] + [chern(k, w) if k in idx[i] else 0 for k in range(1, len(w)+1)] + [0 for k in range(len(w), self.dim)]
+                ctop = chern(self.dim, self.T.weight(pt))
+                for p in ans.keys():
+                    ans[p] += prod(cs[i][k] for i in range(len(p)) for k in p[i]) * QQ((1, ctop))
+            return ans
+
+        each = max(len(self.points) // Nthreads.n, 10)
+        num = len(self.points) // each
+        c = compute([self.points[i*each:(i+1)*each] for i in range(num)] + [self.points[num*each:]])
+        ans = {p: 0 for p in partitions}
+        for (_, ci) in c:
+            for p in ans.keys():
+                ans[p] += ci[p]
+        return ans
 
     def __mul__(self, other):
         """
@@ -87,12 +134,129 @@ class TnVariety:
         if not isinstance(other, TnVariety):
             raise TypeError(str(other) + " is not a TnVariety")
         n = self.dim + other.dim
-        points = cartesian_product([self.__points, other.__points])
-        weight = lambda p: self.__weight(p[0]) + other.__weight(p[1])
-        return TnVariety(n, points, weight)
+        points = cartesian_product([self.points, other.points])
+        weight = lambda p: self.T.weight(p[0]) + other.T.weight(p[1])
+        X = TnVariety(n, points)
+        X.T = TnBundle(X, n, weight)
+        try:
+            X.w = [self.w, other.w]
+        except:
+            pass
+        return X
 
     def __repr__(self):
-        return "TnVariety of dim " + str(self.dim) + " with " + str(len(self.__points)) + " fixed points"
+        return "TnVariety of dim " + str(self.dim) + " with " + str(len(self.points)) + " fixed points"
+
+class TnBundle:
+    """
+    An equivariant bundle for a torus action.
+    """
+    def __init__(self, X, r, weight):
+        self.parent = X
+        self.rank = r
+        self.weight = weight
+
+    def integral(self, c=None):
+        X = self.parent
+        if c == None: # top Chern class
+            p = Partition([X.dim])
+            return self.integrals([p])[p]
+        if isinstance(c, Partition): # Chern class as Partition
+            return self.integrals([c])[c]
+        if isinstance(c, list): # Chern class as list
+            c.sort(reverse=True)
+            c = Partition(c)
+            return self.integrals([c])[c]
+        # Chern class as polynomial
+        return self.parent.integrals([self], c)
+
+    def integrals(self, partitions):
+        ans = self.parent._TnVariety__integrals([self], [(p,) for p in partitions])
+        return {p: ans[(p,)] for p in partitions}
+
+    def dual(self):
+        return TnBundle(self.parent, self.rank, lambda p: [-wi for wi in self.weight(p)])
+
+    def det(self):
+        return TnBundle(self.parent, 1, lambda p: [sum(self.weight(p))])
+
+    def symmetric_power(self, k):
+        return TnBundle(self.parent, binomial(self.rank+k-1,k), lambda p: [sum(c) for c in sym(self.weight(p), k)])
+
+    def exterior_power(self, k):
+        return TnBundle(self.parent, binomial(self.rank, k), lambda p: [sum(c) for c in comb(self.weight(p), k)])
+
+    def chi(self):
+        """
+        Return the holomorphic Euler characteristic, using
+        Hirzebruch-Riemann-Roch.
+
+        EXAMPLES::
+
+            sage: from bott import Pn
+            sage: Pn(3).cotangent_bundle().chi()
+            -1
+        """
+        X = self.parent
+        R = PolynomialRing(QQ, ["c"+str(i+1) for i in range(self.rank)] + ["d"+str(i+1) for i in range(X.dim)], order=TermOrder("wdeglex", list(range(1, self.rank+1)) + list(range(1, X.dim+1))))
+        ch = self.rank + capped_logg(sum(R.gens()[:self.rank]), X.dim)
+        td = todd(X.dim)
+        td = hom(parent(td), R, R.gens()[self.rank:])(td)
+        return X.integrals([self, X.T], ch * td) # HRR
+
+    def __check_other(self, other):
+        if not isinstance(other, TnBundle):
+            raise TypeError(str(other) + " is not a TnBundle")
+        if not other.parent == self.parent:
+            raise ValueError("Parents do not agree")
+
+    def __add__(self, other):
+        self.__check_other(other)
+        return TnBundle(self.parent, self.rank + other.rank, lambda p: self.weight(p) + other.weight(p))
+
+    def __mul__(self, other):
+        self.__check_other(other)
+        return TnBundle(self.parent, self.rank * other.rank, lambda p: [u + v for u in self.weight(p) for v in other.weight(p)])
+
+    def boxtimes(self, other):
+        """
+        Return the box product of self and other, that is, the tensor product
+        of the respective pullbacks to the product variety.
+
+        EXAMPLES::
+
+            sage: from bott import Pn
+            sage: Pn(1).O(1).boxtimes(Pn(1).O(2))
+            TnBundle of rank 1 on TnVariety of dim 2
+        """
+        if not isinstance(other, TnBundle):
+            raise TypeError(str(other) + " is not a TnBundle")
+        return TnBundle(self.parent * other.parent, self.rank * other.rank, lambda p: [u + v for u in self.weight(p[0]) for v in other.weight(p[1])])
+
+    def __repr__(self):
+        return "TnBundle of rank " + str(self.rank) + " on TnVariety of dim " + str(self.parent.dim)
+
+def comb(w, k):
+    def dfs(k, n):
+        if k < 1:
+            yield pp[:]
+        else:
+            for m in range(k, n+1):
+                pp[k-1] = w[m-1]
+                yield from dfs(k-1, m-1)
+    pp = [0] * k
+    yield from dfs(k, len(w))
+
+def sym(w, k):
+    def dfs(k, n):
+        if k < 1:
+            yield pp[:]
+        else:
+            for m in range(1, n+1):
+                pp[k-1] = w[m-1]
+                yield from dfs(k-1, m)
+    pp = [0] * k
+    yield from dfs(k, len(w))
 
 class CobordismClass:
     """
@@ -150,12 +314,13 @@ class CobordismClass:
         Compute the integral of a polynomial in Chern classes.
         """
         ans = 0
-        monoms, coeffs = c.monomials(), c.coefficients()
-        for i in range(len(monoms)):
-            if monoms[i].degree() == self.dim:
-                d = monoms[i].exponents()[0]
+        for monom in c.monomials():
+            if monom.degree() == self.dim:
+                d = monom.exponents()[0]
+                if c.parent().ngens() == 1:
+                    d = [d]
                 p = Partition([i+1 for i in range(self.dim-1,-1,-1) for j in range(d[i])])
-                ans += coeffs[i] * self.__cn[p]
+                ans += c.monomial_coefficient(monom) * self.__cn[p]
         return ans
 
     def chern_characters(self, nonzero=True):
@@ -176,7 +341,7 @@ class CobordismClass:
         if nonzero:
             return {p: v for (p, v) in ans.items() if v != 0}
         return ans
-    
+
     def chern_character(self, p):
         """
         Return a single Chern number in Chern characters.
@@ -233,16 +398,15 @@ def _product(m, n):
     ans = {p: {} for p in pp}
     for p in pp:
         cp = prod(c[i] for i in p)
-        monoms, coeffs = cp.monomials(), cp.coefficients()
-        for i in range(len(monoms)):
-            d = monoms[i].exponents()[0]
+        for monom in cp.monomials():
+            d = monom.exponents()[0]
             if sum(d[i] * (i+1) for i in range(m)) == m:
                 p1 = Partition([i+1 for i in range(m-1,-1,-1) for j in range(d[i])])
                 p2 = Partition([i+1 for i in range(n-1,-1,-1) for j in range(d[i+m])])
-                ans[p][(p1,p2)] = coeffs[i]
+                ans[p][(p1,p2)] = cp.monomial_coefficient(monom)
     return ans
 
-def Pn(n):
+def Pn(n, w=None):
     """
     Projective space of dimension n, with a torus action.
 
@@ -252,9 +416,9 @@ def Pn(n):
         sage: Pn(3)
         TnVariety of dim 3 with 4 fixed points
     """
-    return TnVariety(n, range(n+1), lambda k: [x-k for x in range(0, k)] + [x-k for x in range(k+1, n+1)])
+    return grassmannian(1, n+1, w=w)
 
-def grassmannian(k, n):
+def grassmannian(k, n, w=None):
     """
     Grassmannian Gr(k, n), with a torus action.
 
@@ -263,27 +427,74 @@ def grassmannian(k, n):
         sage: from bott import grassmannian
         sage: grassmannian(2, 4)
         TnVariety of dim 4 with 6 fixed points
+        sage: grassmannian(2, 4).bundles
+        [TnBundle of rank 2 on TnVariety of dim 4,
+         TnBundle of rank 2 on TnVariety of dim 4]
+        sage: grassmannian(2, 4).bundles[0].dual().symmetric_power(3).integral()
+        27
     """
-    if k <= 0 or k >= n:
+    if k < 0 or k > n:
         raise ValueError("wrong input for Grassmannian")
-    return TnVariety(k*(n-k), Combinations(n, k), lambda v: [b-a for b in range(n) if not b in v for a in v])
+    if w == None:
+        w = list(range(n))
+    G = TnVariety(k*(n-k), [tuple(c) for c in Combinations(n, k)])
+    U = TnBundle(G, k, lambda p: [w[i] for i in p])
+    Q = TnBundle(G, n-k, lambda p: [w[i] for i in range(n) if not i in p])
+    G.T = U.dual() * Q
+    G.O1 = Q.det()
+    G.bundles = [U, Q]
+    G.w = w
+    return G
+
+def flag(*dims, w=None):
+    """
+    Flag variety with a torus action.
+
+    EXAMPLES::
+
+        sage: from bott import flag
+        sage: flag(1,6,10)
+        TnVariety of dim 29 with 1260 fixed points
+        sage: A,B,C = flag(1,6,10).bundles
+        sage: integral((A*B.exterior_power(2) + A*B*C).dual())
+        990
+    """
+    n, l = dims[-1], len(dims)
+    if w == None:
+        w = list(range(n))
+    ranks = [dims[0]] + [dims[i+1] - dims[i] for i in range(l-1)]
+    d = sum(ranks[i] * (n - dims[i]) for i in range(l))
+    def enum(i, rest):
+        if i == l:
+            return [[rest]]
+        return [[x] + y for x in Combinations(rest, ranks[i-1]) for y in enum(i+1, [r for r in rest if not r in x])]
+    Fl = TnVariety(d, [tuple(c) for c in enum(1, range(n))])
+    def closure(i):
+        return lambda p: [w[j] for j in p[i]]
+    Fl.bundles = [TnBundle(Fl, ranks[i], closure(i)) for i in range(l)]
+    z = TnBundle(Fl, 0, lambda p: [])
+    Fl.T = sum([Fl.bundles[i].dual() * sum([Fl.bundles[j] for j in range(i+1,l)], z) for i in range(l-1)], z)
+    Fl.w = w
+    return Fl
 
 def _hilb(n, parts, wt):
     points = [x for pp in parts for x in cartesian_product([Partitions(x) for x in pp])]
     def weight(pt):
         w = []
-        for k,l,m in wt:
-            if len(pt[k]) > 0:
-                b = pt[k].conjugate()
-                for s in range(len(pt[k])):
-                    j = pt[k][s]
+        for p,(l,m) in zip(pt, wt):
+            if len(p) > 0:
+                b = p.conjugate()
+                for s in range(len(p)):
+                    j = p[s]
                     for i in range(j):
                         w.append(l*(i-j)   + m*(b[i]-s-1))
                         w.append(l*(j-i-1) + m*(s-b[i]))
         return w
-    return TnVariety(2*n, points, weight)
+    X = TnVariety(2*n, points)
+    X.T = TnBundle(X, 2*n, weight)
+    return X
 
-def hilb_P2(n):
+def hilb_P2(n, w=None):
     """
     Hilbert scheme of n points on the projective plane, with a torus action.
 
@@ -293,9 +504,11 @@ def hilb_P2(n):
         sage: hilb_P2(2)
         TnVariety of dim 4 with 9 fixed points
     """
-    return _hilb(n, [[a, b-a-1, n+1-b] for a,b in Combinations(n+2, 2)], [[0,1,n+1], [1,n,-1], [2,-n-1,-n]])
+    if w == None:
+        w = [0,1,n+1]
+    return _hilb(n, [[a, b-a-1, n+1-b] for a,b in Combinations(n+2, 2)], [[w[k]-w[k+1], w[k]-w[k+2]] for k in GF(3)])
 
-def hilb_P1xP1(n):
+def hilb_P1xP1(n, w=None):
     """
     Hilbert scheme of n points on the product of two projective lines, with a
     torus action.
@@ -306,7 +519,9 @@ def hilb_P1xP1(n):
         sage: hilb_P1xP1(2)
         TnVariety of dim 4 with 14 fixed points
     """
-    return _hilb(n, [[a, b-a-1, c-b-1, n+2-c] for a,b,c in Combinations(n+3, 3)], [[0,-n,-1], [1,n,-1], [2,-n,1], [3,n,1]])
+    if w == None:
+        w = [[0,1], [2,n+2]]
+    return _hilb(n, [[a, b-a-1, c-b-1, n+2-c] for a,b,c in Combinations(n+3, 3)], [[w[0][k]-w[0][k+1], w[1][j]-w[1][j+1]] for k in GF(2) for j in GF(2)])
 
 def by_degree(x, n):
     c = [x.parent(0)] * (n+1)
@@ -317,14 +532,10 @@ def by_degree(x, n):
         for i in range(max(n, len(l))):
             c[i] = l[i] * g**i
         return c
-    monoms, coeffs = x.monomials(), x.coefficients()
-    for i in range(len(monoms)):
-        d = monoms[i].degree() 
+    for monom in x.monomials():
+        d = monom.degree()
         if d <= n:
-            if type(coeffs) == dict:
-                c[d] += coeffs[monoms[i]] * monoms[i]
-            else:
-                c[d] += coeffs[i] * monoms[i]
+            c[d] += x.monomial_coefficient(monom) * monom
     return c
 
 def capped_log(x, n):
@@ -371,7 +582,7 @@ def compute_sum(x, dim, classes, check = lambda _: True):
                 for p in partitions:
                     ans[p] += coeff * c.chern_number(p)
         return ans
-    terms = list(zip(x.monomials(), x.coefficients()))
+    terms = [(monom, x.monomial_coefficient(monom)) for monom in x.monomials()]
     partitions = Partitions(dim)
     each = max(len(terms) // Nthreads.n, 10)
     num = len(terms) // each
@@ -476,7 +687,7 @@ def universal_genus(n, images=None, twist=0):
     whose images of the first n projective spaces are known, one can compute
     its total class as a polynomial in Chern classes. For example, the Todd
     genus can be obtained using a list of ones.
-    
+
     EXAMPLES::
 
         sage: universal_genus(3, [QQ(1)]*3)
@@ -510,7 +721,7 @@ def sqrt_todd(n):
     classes.
 
     EXAMPLES::
-    
+
         sage: from bott import hilb_K3, sqrt_todd
         sage: sqrt_todd(2)
         1/96*c1^2 + 1/24*c2 + 1/4*c1 + 1
@@ -519,7 +730,7 @@ def sqrt_todd(n):
     """
     return capped_sqrt(todd(n), n)
 
-def chern_character(n):
+def chern_character(rank, dim=None):
     """
     Compute the Chern character as a polynomial in Chern classes.
 
@@ -528,9 +739,11 @@ def chern_character(n):
         sage: from bott import chern_character
         sage: chern_character(3)
         1/6*c1^3 - 1/2*c1*c2 + 1/2*c3 + 1/2*c1^2 - c2 + c1 + 3
+        sage: chern_character(1, 4)
+        1/24*c1^4 + 1/6*c1^3 + 1/2*c1^2 + c1 + 1
     """
-    R = PolynomialRing(QQ, ["c"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
-    return n + capped_logg(R(sum(R.gens())), n)
+    R = PolynomialRing(QQ, ["c"+str(i+1) for i in range(rank)], order=TermOrder("wdeglex", tuple(range(1,rank+1))))
+    return rank + capped_logg(R(sum(R.gens())), dim if dim != None else rank)
 
 @cached_function
 def kummer(n):
@@ -575,3 +788,77 @@ def OG(n):
         return CobordismClass(10, {Partition([10]): 176904, Partition([8,2]): 1791720, Partition([6,4]): 5159700, Partition([6,2,2]): 12383280, Partition([4,4,2]): 22113000, Partition([4,2,2,2]): 53071200, Partition([2,2,2,2,2]): 127370880})
     else:
         raise ValueError("Use OG(6) and OG(10) for O'Grady examples")
+
+def to_P2k(L, k):
+    P = L.parent
+    w = P.w
+    P2k = hilb_P2(k, w=w)
+    def loc(p):
+        ws = []
+        for k in GF(3):
+            for (j, a) in enumerate(p[k]):
+                for i in range(a):
+                    for l in L.weight(P.points[k]):
+                        ws.append(l + i*(w[k+1]-w[k]) + j*(w[k+2]-w[k]))
+        return ws
+    return TnBundle(P2k, k*L.rank, loc)
+
+def to_P1xP1k(L, k):
+    P = L.parent
+    w = P.w
+    P1xP1k = hilb_P1xP1(k, w=w)
+    def loc(p):
+        ws = []
+        for k0 in GF(2):
+            for k1 in GF(2):
+                n = 2*int(k0) + int(k1)
+                for (j, a) in enumerate(p[n]):
+                    for i in range(a):
+                        for l in L.weight(P.points[n]):
+                            ws.append(l + i*(w[0][k0+1]-w[0][k0]) + j*(w[1][k1+1]-w[1][k1]))
+        return ws
+    return TnBundle(P1xP1k, k*L.rank, loc)
+
+def fujiki_constant(n):
+    """
+    Return the Fujiki constants of the Chern classes on K3[n].
+
+    EXAMPLES::
+
+        sage: from bott import fujiki_constant
+        sage: print(fujiki_constant(2))
+        {[]: 3, [2]: 30, [4]: 324, [2, 2]: 828}
+    """
+    g = universal_genus(2*n)
+    Omega = parent(g).base_ring()
+    P = [Omega(0)] + list(Omega.gens())
+    Rt = PolynomialRing(Omega, "t")
+    t = Rt.gen()
+    A, B = Rt(1), Rt(1)
+    for k in range(1, n+1):
+        R = PolynomialRing(Omega, ["c"+str(i+1) for i in range(2*k)] + ["E"], order=TermOrder("wdeglex", list(range(1, 2*k+1)) + [1]))
+        gk = universal_genus(2*k)
+        c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
+        # pick a random weight w
+        Ok = to_P2k(Pn(2, w=[0,12,1321]).O(), k).det()
+        P2k = Ok.parent
+        A += t**k * P2k.integrals([P2k.T, Ok], c)
+        # pick random weights w
+        Ok = to_P1xP1k((Pn(1, w=[0,121]) * Pn(1, w=[0,213])).O(), k)
+        P1xP1k = Ok.parent
+        B += t**k * P1xP1k.integrals([P1xP1k.T, Ok], c)
+    C = capped_exp(-16 * capped_log(A, n) + 18 * capped_log(B, n), n)
+    c = [0] + list(parent(g).gens())
+    ans = {}
+    coeffs_in_Pn = lambda x, m: [x.monomial_coefficient(Omega(prod(P[k] for k in p))) for p in Partitions(m)]
+    for m in range(0, n+1):
+        M = matrix([coeffs_in_Pn(g.monomial_coefficient(g.parent(prod(c[2*k] for k in p))), 2*m) for p in Partitions(m)])
+        Cn = by_degree(C.monomial_coefficient(t**n), 2*n)
+        coeffs = M.solve_left(vector(coeffs_in_Pn(Cn[2*m], 2*m)))
+        for (q, v) in zip(Partitions(m), coeffs):
+            q = Partition([2*qi for qi in q])
+            if m == 0 and n == 1:
+                ans[q] = 1
+            else:
+                ans[q] = v * factorial(2*(n-m)) / (2-2*n)**(n-m)
+    return ans
