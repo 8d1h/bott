@@ -376,6 +376,7 @@ def compute_sum(x, dim, classes, check = lambda _: True):
             ans[p] += ci[p]
     return ans
 
+@cached_function
 def hilb_K3(n):
     """
     Compute the Chern numbers of the Hilbert scheme of n points on a K3
@@ -519,6 +520,7 @@ def chern_character(n):
     R = PolynomialRing(QQ, ["c"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
     return n + capped_logg(sum(R.gens()), n)
 
+@cached_function
 def kummer(n):
     """
     Compute the Chern numbers of the generalized Kummer variety of dimension
@@ -538,3 +540,20 @@ def kummer(n):
     K = QQ((2*(n+1)**2, 9)) * by_degree(by_degree(log(1+sum(P2n[k].integral(g[2*(k+1)]) * z**(k+1) for k in range(0, n+1))), n+1)[n+1].coefficients()[0].coefficients()[0], 2*n)[2*n]
     PP = [Pn(k+1).cobordism_class() for k in range(2*n)]
     return CobordismClass(2*n, compute_sum(K, 2*n, PP))
+
+def OG(n):
+    """
+    Return the cobordism class of O'Grady examples OG6 and OG10.
+
+    EXAMPLES::
+
+        sage: from bott import OG
+        sage: OG(6)
+        Cobordism Class of dim 6
+    """
+    if n == 6:
+        return CobordismClass(6, {Partition([6]): 1920, Partition([4,2]): 7680, Partition([2,2,2]): 30720})
+    elif n == 10:
+        return CobordismClass(10, {Partition([10]): 176904, Partition([8,2]): 1791720, Partition([6,4]): 5159700, Partition([6,2,2]): 12383280, Partition([4,4,2]): 22113000, Partition([4,2,2,2]): 53071200, Partition([2,2,2,2,2]): 127370880})
+    else:
+        raise ValueError("Use OG(6) and OG(10) for O'Grady examples")
