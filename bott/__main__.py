@@ -415,9 +415,9 @@ def hilb_surface(n, c1c1, c2, parent=QQ):
         {[4]: 1/2*b^2 + 3/2*b, [3, 1]: a*b + 3*a, [2, 2]: 1/2*a^2 + b^2 + a + 21/2*b, [2, 1, 1]: a^2 + a*b + 6*a, [1, 1, 1, 1]: 3*a^2}
     """
     a, b = matrix([[9,8],[3,4]]).solve_right(vector([c1c1, c2]))
-    S = PowerSeriesRing(parent, ["a"+str(i+1) for i in range(n)]+["b"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))+tuple(range(1,n+1))), default_prec=n+1)
+    S = PolynomialRing(parent, ["a"+str(i+1) for i in range(n)]+["b"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))+tuple(range(1,n+1))))
     A, B = gens(S)[:n], gens(S)[n:]
-    HS = S(exp(a*log(1+sum(A))+b*log(1+sum(B)))).polynomial()
+    HS = capped_exp(a*capped_log(1+sum(A), n)+b*capped_log(1+sum(B), n), n)
     P2n    = [hilb_P2(k+1).cobordism_class()    for k in range(n)]
     P1xP1n = [hilb_P1xP1(k+1).cobordism_class() for k in range(n)]
     ans = compute_sum(HS, 2*n, P2n+P1xP1n, check=lambda d: d == n)
