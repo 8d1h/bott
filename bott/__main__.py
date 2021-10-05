@@ -164,6 +164,7 @@ class TnBundle:
         if isinstance(c, Partition): # Chern class as Partition
             return self.integrals([c])[c]
         if isinstance(c, list): # Chern class as list
+            c = c[:]
             c.sort(reverse=True)
             c = Partition(c)
             return self.integrals([c])[c]
@@ -303,6 +304,7 @@ class CobordismClass:
             324
         """
         if type(p) == list:
+            p = p[:]
             p.sort(reverse=True)
             p = Partition(p)
         if p.size() != self.dim:
@@ -353,6 +355,7 @@ class CobordismClass:
             15
         """
         if type(p) == list:
+            p = p[:]
             p.sort(reverse=True)
             p = Partition(p)
         if p.size() != self.dim:
