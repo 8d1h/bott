@@ -139,6 +139,7 @@ class CobordismClass:
             324
         """
         if type(p) == list:
+            p.sort(reverse=True)
             p = Partition(p)
         if p.size() != self.dim:
             raise ValueError(str(p) + " is not a partition of " + str(self.dim))
@@ -187,6 +188,7 @@ class CobordismClass:
             15
         """
         if type(p) == list:
+            p.sort(reverse=True)
             p = Partition(p)
         if p.size() != self.dim:
             raise ValueError(str(p) + " is not a partition of " + str(self.dim))
@@ -307,7 +309,7 @@ def hilb_P1xP1(n):
     return _hilb(n, [[a, b-a-1, c-b-1, n+2-c] for a,b,c in Combinations(n+3, 3)], [[0,-n,-1], [1,n,-1], [2,-n,1], [3,n,1]])
 
 def by_degree(x, n):
-    c = [0] * (n+1)
+    c = [x.parent(0)] * (n+1)
     if x.parent().ngens() == 1:
         g = x.parent().gen()
         l = x.list()
@@ -326,6 +328,8 @@ def by_degree(x, n):
     return c
 
 def capped_log(x, n):
+    if n == 0:
+        return x.parent(0)
     e = by_degree(x, n)
     p = [e[1]] + [0] * (n-1)
     for i in range(n-1):
@@ -333,6 +337,8 @@ def capped_log(x, n):
     return sum(QQ((1, i+1))*p[i] for i in range(n))
 
 def capped_logg(x, n):
+    if n == 0:
+        return x.parent(0)
     e = by_degree(x, n)
     p = [-e[1]] + [0] * (n-1)
     for i in range(n-1):
@@ -342,7 +348,7 @@ def capped_logg(x, n):
 def capped_exp(x, n):
     comps = by_degree(x, n)
     p = [i * comps[i] for i in range(n+1)]
-    e = [1] + [0] * (n)
+    e = [x.parent(1)] + [0] * (n)
     for i in range(n):
         e[i+1] = QQ((1, i+1)) * sum(p[j+1] * e[i-j] for j in range(i+1))
     return sum(e)
@@ -361,7 +367,7 @@ def compute_sum(x, dim, classes, check = lambda _: True):
         for (monom, coeff) in terms:
             if check(monom.degree()):
                 d = monom.exponents()[0]
-                c = prod([classes[k] for k in range(N) for _ in range(d[k])])
+                c = prod([classes[k] for k in range(N) for _ in range(d[k])], z=Pn(0).cobordism_class())
                 for p in partitions:
                     ans[p] += coeff * c.chern_number(p)
         return ans
@@ -388,6 +394,12 @@ def hilb_K3(n):
         sage: X = hilb_K3(3)
         sage: print(X.chern_numbers())
         {[6]: 3200, [4, 2]: 14720, [2, 2, 2]: 36800}
+
+    TESTS::
+
+        sage: from bott import hilb_K3
+        sage: hilb_K3(0)
+        Cobordism Class of dim 0
     """
     return hilb_surface(n, 0, 24)
 
@@ -417,7 +429,7 @@ def hilb_surface(n, c1c1, c2, parent=QQ):
     a, b = matrix([[9,8],[3,4]]).solve_right(vector([c1c1, c2]))
     S = PolynomialRing(parent, ["a"+str(i+1) for i in range(n)]+["b"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))+tuple(range(1,n+1))))
     A, B = gens(S)[:n], gens(S)[n:]
-    HS = capped_exp(a*capped_log(1+sum(A), n)+b*capped_log(1+sum(B), n), n)
+    HS = capped_exp(a*capped_log(S(1)+sum(A), n)+b*capped_log(S(1)+sum(B), n), n)
     P2n    = [hilb_P2(k+1).cobordism_class()    for k in range(n)]
     P1xP1n = [hilb_P1xP1(k+1).cobordism_class() for k in range(n)]
     ans = compute_sum(HS, 2*n, P2n+P1xP1n, check=lambda d: d == n)
@@ -433,8 +445,8 @@ def genus(x, taylor, n, twist=0):
     lg = log(sum(taylor[i] * t**i for i in range(n+1))).list()
     lg = lg + [0] * (n+1-len(lg))
     comps = by_degree(x, n)
-    c1 = x.parent().gens()[0] # assuming that the first gen is c1
-    g = capped_exp(sum(factorial(i)*lg[i]*comps[i] for i in range(n+1)) + twist*c1, n)
+    T = twist * x.parent().gens()[0] if twist != 0 else 0 # assuming that the first gen is c1
+    g = capped_exp(sum(factorial(i)*lg[i]*comps[i] for i in range(n+1)) + T, n)
     return g
 
 def _taylor(phi, n):
@@ -477,7 +489,7 @@ def universal_genus(n, images=None, twist=0):
         S = images[0].parent()
         images = [S(1)] + images
     R = PolynomialRing(S, ["c"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
-    g = genus(capped_logg(sum(R.gens()), n), _taylor(images, n), n, twist=twist)
+    g = genus(capped_logg(R(sum(R.gens())), n), _taylor(images, n), n, twist=twist)
     return g
 
 def todd(n):
@@ -518,7 +530,7 @@ def chern_character(n):
         1/6*c1^3 - 1/2*c1*c2 + 1/2*c3 + 1/2*c1^2 - c2 + c1 + 3
     """
     R = PolynomialRing(QQ, ["c"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
-    return n + capped_logg(sum(R.gens()), n)
+    return n + capped_logg(R(sum(R.gens())), n)
 
 @cached_function
 def kummer(n):
@@ -532,6 +544,12 @@ def kummer(n):
         sage: X = kummer(3)
         sage: print(X.chern_numbers())
         {[6]: 448, [4, 2]: 6784, [2, 2, 2]: 30208}
+
+    TESTS::
+
+        sage: from bott import kummer
+        sage: kummer(0)
+        Cobordism Class of dim 0
     """
     P2n = [hilb_P2(k+1).cobordism_class() for k in range(n+1)]
     g = universal_genus(2*(n+1), twist=1)
