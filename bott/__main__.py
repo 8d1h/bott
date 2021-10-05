@@ -26,6 +26,9 @@ class TnVariety:
     def cotangent_bundle(self):
         return self.T.dual()
 
+    def dimension(self):
+        return self.dim
+
     def fixed_points(self):
         """
         Return the list of fixed points of the torus action.
@@ -87,8 +90,8 @@ class TnVariety:
                 pp = []
                 k = 0
                 for F in Fs:
-                    pp.append(Partition([i+1 for i in range(F.rank-1,-1,-1) for j in range(d[k+i])]))
-                    k += F.rank
+                    pp.append(Partition([i+1 for i in range(rank(F)-1,-1,-1) for j in range(d[k+i])]))
+                    k += rank(F)
                 partitions[tuple(pp)] = c.monomial_coefficient(monom)
         ans = self.__integrals(Fs, partitions.keys())
         return sum(a * ans[p] for (p, a) in partitions.items())
@@ -153,8 +156,11 @@ class TnBundle:
     """
     def __init__(self, X, r, weight):
         self.parent = X
-        self.rank = r
+        self.r = r
         self.weight = weight
+
+    def rank(self):
+        return self.r
 
     def integral(self, c=None):
         X = self.parent
@@ -176,16 +182,16 @@ class TnBundle:
         return {p: ans[(p,)] for p in partitions}
 
     def dual(self):
-        return TnBundle(self.parent, self.rank, lambda p: [-wi for wi in self.weight(p)])
+        return TnBundle(self.parent, rank(self), lambda p: [-wi for wi in self.weight(p)])
 
     def det(self):
         return TnBundle(self.parent, 1, lambda p: [sum(self.weight(p))])
 
     def symmetric_power(self, k):
-        return TnBundle(self.parent, binomial(self.rank+k-1,k), lambda p: [sum(c) for c in sym(self.weight(p), k)])
+        return TnBundle(self.parent, binomial(rank(self)+k-1,k), lambda p: [sum(c) for c in sym(self.weight(p), k)])
 
     def exterior_power(self, k):
-        return TnBundle(self.parent, binomial(self.rank, k), lambda p: [sum(c) for c in comb(self.weight(p), k)])
+        return TnBundle(self.parent, binomial(rank(self), k), lambda p: [sum(c) for c in comb(self.weight(p), k)])
 
     def chi(self):
         """
@@ -199,10 +205,10 @@ class TnBundle:
             -1
         """
         X = self.parent
-        R = PolynomialRing(QQ, ["c"+str(i+1) for i in range(self.rank)] + ["d"+str(i+1) for i in range(X.dim)], order=TermOrder("wdeglex", list(range(1, self.rank+1)) + list(range(1, X.dim+1))))
-        ch = self.rank + capped_logg(sum(R.gens()[:self.rank]), X.dim)
-        td = todd(X.dim)
-        td = hom(parent(td), R, R.gens()[self.rank:])(td)
+        R = PolynomialRing(QQ, ["c"+str(i+1) for i in range(rank(self))] + ["d"+str(i+1) for i in range(X.dim)], order=TermOrder("wdeglex", list(range(1, rank(self)+1)) + list(range(1, X.dim+1))))
+        ch = rank(self) + capped_logg(R(sum(R.gens()[:rank(self)])), dim(X))
+        td = todd(dim(X))
+        td = hom(parent(td), R, R.gens()[rank(self):])(td)
         return X.integrals([self, X.T], ch * td) # HRR
 
     def __check_other(self, other):
@@ -213,11 +219,11 @@ class TnBundle:
 
     def __add__(self, other):
         self.__check_other(other)
-        return TnBundle(self.parent, self.rank + other.rank, lambda p: self.weight(p) + other.weight(p))
+        return TnBundle(self.parent, rank(self) + rank(other), lambda p: self.weight(p) + other.weight(p))
 
     def __mul__(self, other):
         self.__check_other(other)
-        return TnBundle(self.parent, self.rank * other.rank, lambda p: [u + v for u in self.weight(p) for v in other.weight(p)])
+        return TnBundle(self.parent, rank(self) * rank(other), lambda p: [u + v for u in self.weight(p) for v in other.weight(p)])
 
     def boxtimes(self, other):
         """
@@ -232,10 +238,10 @@ class TnBundle:
         """
         if not isinstance(other, TnBundle):
             raise TypeError(str(other) + " is not a TnBundle")
-        return TnBundle(self.parent * other.parent, self.rank * other.rank, lambda p: [u + v for u in self.weight(p[0]) for v in other.weight(p[1])])
+        return TnBundle(self.parent * other.parent, rank(self) * rank(other), lambda p: [u + v for u in self.weight(p[0]) for v in other.weight(p[1])])
 
     def __repr__(self):
-        return "TnBundle of rank " + str(self.rank) + " on TnVariety of dim " + str(self.parent.dim)
+        return "TnBundle of rank " + str(rank(self)) + " on TnVariety of dim " + str(self.parent.dim)
 
 def comb(w, k):
     def dfs(k, n):
@@ -268,15 +274,28 @@ class CobordismClass:
         sage: from bott import CobordismClass
         sage: CobordismClass(2, {Partition([2]): 24})
         Cobordism Class of dim 2
+
+    TESTS::
+
+        sage: from bott import CobordismClass
+        sage: CobordismClass(2, {Partition([1]): 1})
+        Traceback (most recent call last):
+        ...
+        ValueError: [1] is not a partition of 2
     """
     def __init__(self, n, chern_numbers, check=True):
         self.dim = n
         self.__cn = chern_numbers
-        if check and not all([p.size() == n for p in chern_numbers.keys()]):
-            raise ValueError(str(p) + " is not a partition of " + str(n))
+        if check:
+            for p in chern_numbers.keys():
+                if p.size() != n:
+                    raise ValueError(str(p) + " is not a partition of " + str(n))
         for p in Partitions(n):
             if not p in self.__cn.keys():
                 self.__cn[p] = 0
+
+    def dimension(self):
+        return self.dim
 
     def chern_numbers(self, nonzero=True):
         """
@@ -372,6 +391,8 @@ class CobordismClass:
             sage: from bott import hilb_K3
             sage: hilb_K3(1) * hilb_K3(1)
             Cobordism Class of dim 4
+            sage: hilb_K3(0) * hilb_K3(0)
+            Cobordism Class of dim 0
         """
         if not isinstance(other, CobordismClass):
             raise TypeError(str(other) + " is not a CobordismClass")
@@ -387,20 +408,25 @@ class CobordismClass:
                 ans[p] += v * self.chern_number(p1) * other.chern_number(p2)
         return CobordismClass(m + n, ans)
 
+    def __eq__(self, other):
+        if isinstance(other, CobordismClass):
+            return dim(self) == dim(other) and self.chern_numbers() == other.chern_numbers()
+        return False
+
     def __repr__(self):
         return "Cobordism Class of dim " + str(self.dim)
 
 @cached_function
 def _product(m, n):
     R = PolynomialRing(QQ, ["c"+str(i) for i in range(m)] + ["d"+str(i) for i in range(n)], order=TermOrder("wdeglex", list(range(1,m+1)) + list(range(1,n+1))))
-    TX = 1+sum(R.gens()[0:m])
-    TY = 1+sum(R.gens()[m:m+n])
+    TX = R(1)+sum(R.gens()[0:m])
+    TY = R(1)+sum(R.gens()[m:m+n])
     cTXY = TX * TY
     c = by_degree(cTXY, m+n)
     pp = Partitions(m+n)
     ans = {p: {} for p in pp}
     for p in pp:
-        cp = prod(c[i] for i in p)
+        cp = prod((c[i] for i in p), z=R(1))
         for monom in cp.monomials():
             d = monom.exponents()[0]
             if sum(d[i] * (i+1) for i in range(m)) == m:
@@ -436,17 +462,8 @@ def grassmannian(k, n, w=None):
         sage: grassmannian(2, 4).bundles[0].dual().symmetric_power(3).integral()
         27
     """
-    if k < 0 or k > n:
-        raise ValueError("wrong input for Grassmannian")
-    if w == None:
-        w = list(range(n))
-    G = TnVariety(k*(n-k), [tuple(c) for c in Combinations(n, k)])
-    U = TnBundle(G, k, lambda p: [w[i] for i in p])
-    Q = TnBundle(G, n-k, lambda p: [w[i] for i in range(n) if not i in p])
-    G.T = U.dual() * Q
-    G.O1 = Q.det()
-    G.bundles = [U, Q]
-    G.w = w
+    G = flag(k, n, w=w)
+    G.O1 = G.bundles[0].det().dual()
     return G
 
 def flag(*dims, w=None):
@@ -465,16 +482,19 @@ def flag(*dims, w=None):
     n, l = dims[-1], len(dims)
     if w == None:
         w = list(range(n))
+    if w != None and not isinstance(w, list):
+        raise ValueError("weight should be a list")
     ranks = [dims[0]] + [dims[i+1] - dims[i] for i in range(l-1)]
     d = sum(ranks[i] * (n - dims[i]) for i in range(l))
     def enum(i, rest):
         if i == l:
             return [[rest]]
-        return [[x] + y for x in Combinations(rest, ranks[i-1]) for y in enum(i+1, [r for r in rest if not r in x])]
+        return [[tuple(x)] + y for x in Combinations(rest, ranks[i-1]) for y in enum(i+1, tuple([r for r in rest if not r in x]))]
     Fl = TnVariety(d, [tuple(c) for c in enum(1, range(n))])
     def closure(i):
         return lambda p: [w[j] for j in p[i]]
-    Fl.bundles = [TnBundle(Fl, ranks[i], closure(i)) for i in range(l)]
+    Fl.bundles = [TnBundle(Fl, ranks[i], closure(i)) for i in range(l) if ranks[i] > 0]
+    l = len(Fl.bundles)
     z = TnBundle(Fl, 0, lambda p: [])
     Fl.T = sum([Fl.bundles[i].dual() * sum([Fl.bundles[j] for j in range(i+1,l)], z) for i in range(l-1)], z)
     Fl.w = w
@@ -700,7 +720,7 @@ def universal_genus(n, images=None, twist=0):
         S = PolynomialRing(QQ, ["P"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
         images = [S(1)] + list(S.gens())
     else:
-        S = images[0].parent()
+        S = images[0].parent() if images != [] else QQ
         images = [S(1)] + images
     R = PolynomialRing(S, ["c"+str(i+1) for i in range(n)], order=TermOrder("wdeglex", tuple(range(1,n+1))))
     g = genus(capped_logg(R(sum(R.gens())), n), _taylor(images, n), n, twist=twist)
@@ -804,7 +824,7 @@ def to_P2k(L, k):
                     for l in L.weight(P.points[k]):
                         ws.append(l + i*(w[k+1]-w[k]) + j*(w[k+2]-w[k]))
         return ws
-    return TnBundle(P2k, k*L.rank, loc)
+    return TnBundle(P2k, k*rank(L), loc)
 
 def to_P1xP1k(L, k):
     P = L.parent
@@ -820,7 +840,7 @@ def to_P1xP1k(L, k):
                         for l in L.weight(P.points[n]):
                             ws.append(l + i*(w[0][k0+1]-w[0][k0]) + j*(w[1][k1+1]-w[1][k1]))
         return ws
-    return TnBundle(P1xP1k, k*L.rank, loc)
+    return TnBundle(P1xP1k, k*rank(L), loc)
 
 def fujiki_constant(n):
     """
