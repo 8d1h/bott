@@ -12,7 +12,7 @@ def find_pyx(path='.'):
 
 setup(
     name="bott",
-    version="0.1",
+    version="0.2",
     setup_requires=["cython", "gmpy2"],
     ext_modules=cythonize(find_pyx(), language_level=3),
     packages=find_packages()

@@ -1,4 +1,4 @@
-This is a Sage library for computing integrals using Bott's residue formula. Currently the main usage is to compute Chern numbers for K3^[n], following [Ellingsrud--Göttsche--Lehn](https://arxiv.org/abs/math/9904095), and generalized Kummer varieties, following [Nieper-Wißkirchen](https://arxiv.org/abs/math/0204197).
+This is a Sage library for computing integrals using Bott's residue formula. Currently the main usage is to compute Chern numbers and Fujiki constants for K3^[n], following [Ellingsrud--Göttsche--Lehn](https://arxiv.org/abs/math/9904095), and generalized Kummer varieties, following [Nieper-Wißkirchen](https://arxiv.org/abs/math/0204197). The data for OG6 and OG10 are also included.
 
 To accelerate the computation, multithreading is used (`bott.nthreads(n)` can be used to set the number of threads); low-level integer arithmetic is done in C using `cython`.
 
