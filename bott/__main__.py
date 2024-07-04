@@ -13,6 +13,12 @@ def nthreads(n):
     """
     Nthreads.n = int(n)
 
+class Cached:
+    def __init__(self):
+        self.K3n = load("K3n")
+        self.Kumn = load("Kumn")
+Cached = Cached()
+
 def list_to_partition(l):
     if isinstance(l, Partition):
         return l
@@ -612,8 +618,190 @@ def compute_sum(x, dim, classes, check = lambda _: True):
             ans[p] += ci[p]
     return ans
 
+class HKCobordismClass(CobordismClass):
+    deformation_type = ''
+    def __eq__(self, other):
+        if isinstance(other, HKCobordismClass):
+            return dim(self) == dim(other) and self.chern_numbers() == other.chern_numbers() and self.fujiki_constants() == other.fujiki_constants()
+        return False
+    @cached_method
+    def fujiki_constants(self):
+        """
+        Return the Fujiki constants of Chern classes on a hyperkähler manifold.
+
+        EXAMPLES::
+
+            sage: from bott import hilb_K3, kummer
+            sage: print(hilb_K3(2).fujiki_constants())
+            {[]: 3, [2]: 30, [4]: 324, [2, 2]: 828}
+            sage: print(kummer(2).fujiki_constants())
+            {[]: 9, [2]: 54, [4]: 108, [2, 2]: 756}
+        """
+        n, typ = dim(self)//2, self.deformation_type
+        if typ == "hilb_K3":
+            g = universal_genus(2*n)
+            Omega = parent(g).base_ring()
+            P = [Omega(0)] + list(Omega.gens())
+            Rt = PolynomialRing(Omega, "t")
+            t = Rt.gen()
+            A, B = Rt(1), Rt(1)
+            for k in range(1, n+1):
+                R = PolynomialRing(Omega, 2*k+1, ["c"+str(i+1) for i in range(2*k)] + ["E"], order=TermOrder("wdeglex", list(range(1, 2*k+1)) + [1]))
+                gk = universal_genus(2*k)
+                c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
+                # pick a random weight w
+                Ok = to_P2k(Pn(2, w=[0,12,1321]).O(), k)
+                P2k = Ok.parent
+                A += t**k * P2k.integrals([P2k.T, Ok], c)
+                # pick random weights w
+                Ok = to_P1xP1k((Pn(1, w=[0,121]) * Pn(1, w=[0,213])).O(), k)
+                P1xP1k = Ok.parent
+                B += t**k * P1xP1k.integrals([P1xP1k.T, Ok], c)
+            C = capped_exp(-16 * capped_log(A, n) + 18 * capped_log(B, n), n)
+            Cn = by_degree(C.monomial_coefficient(t**n), 2*n)
+            c = [0] + list(parent(g).gens())
+            ans = {}
+            coeffs_in_Pn = lambda x, m: [x.monomial_coefficient(Omega(prod(P[k] for k in p))) for p in Partitions(m)]
+            for m in range(0, n+1):
+                M = matrix([coeffs_in_Pn(g.monomial_coefficient(g.parent(prod(c[2*k] for k in p))), 2*m) for p in Partitions(m)])
+                coeffs = M.solve_left(vector(coeffs_in_Pn(Cn[2*m], 2*m)))
+                for (q, v) in zip(Partitions(m), coeffs):
+                    q = Partition([2*qi for qi in q])
+                    if m == 0 and n == 1:
+                        ans[q] = QQ(1)
+                    else:
+                        ans[q] = v * factorial(2*(n-m)) / (2-2*n)**(n-m)
+            return ans
+        elif typ == "kummer":
+            g = universal_genus(2*(n+1))
+            Omega = parent(g).base_ring()
+            P = [Omega(0)] + list(Omega.gens())
+            Rt = PolynomialRing(Omega, "t")
+            t = Rt.gen()
+            Ap, Am, A = Rt(1), Rt(1), Rt(1)
+            for k in range(1, n+2):
+                R = PolynomialRing(Omega, 2*k+1, ["c"+str(i+1) for i in range(2*k)] + ["E"], order=TermOrder("wdeglex", list(range(1, 2*k+1)) + [1]))
+                # pick a random weight w
+                Ok = to_P2k(Pn(2, w=[0,12,1321]).O(), k)
+                P2k = Ok.parent
+                gk = universal_genus(2*k, twist=1)
+                c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
+                Ap += t**k * P2k.integrals([P2k.T, Ok], c)
+                gk = universal_genus(2*k, twist=-1)
+                c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
+                Am += t**k * P2k.integrals([P2k.T, Ok], c)
+                gk = universal_genus(2*k)
+                c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
+                A += t**k * P2k.integrals([P2k.T, Ok], c)
+            K = QQ(((n+1)**2, 9)) * by_degree(capped_log(Ap, n+1) + capped_log(Am, n+1) - 2*capped_log(A, n+1), n+1)[n+1].coefficients()[0]
+            Kn = by_degree(K, 2*n)
+            c = [0] + list(parent(g).gens())
+            ans = {}
+            coeffs_in_Pn = lambda x, m: [x.monomial_coefficient(Omega(prod(P[k] for k in p))) for p in Partitions(m)]
+            for m in range(0, n+1):
+                M = matrix([coeffs_in_Pn(g.monomial_coefficient(g.parent(prod(c[2*k] for k in p))), 2*m) for p in Partitions(m)])
+                coeffs = M.solve_left(vector(coeffs_in_Pn(Kn[2*m], 2*m)))
+                for (q, v) in zip(Partitions(m), coeffs):
+                    q = Partition([2*qi for qi in q])
+                    if m == 0 and n == 1:
+                        ans[q] = QQ(1)
+                    else:
+                        ans[q] = v * factorial(2*(n-m)) / (-2-2*n)**(n-m)
+            return ans
+        elif typ == "OG6":
+            ans = {Partition(p): QQ(v) for (p, v) in [
+                ([], 60),
+                ([2], 288),
+                ([4], 480),
+                ([2,2], 1920)
+            ]}
+            for k in self.chern_numbers().keys():
+                ans[k] = self.chern_number(k)
+            return ans
+        elif typ == "OG10":
+            ans = {Partition(p): QQ(v) for (p, v) in [
+                ([], 945),
+                ([2], 5040),
+                ([4], 13500),
+                ([2,2], 32400),
+                ([6], 26460),
+                ([4,2], 113400),
+                ([2,2,2], 272160),
+                ([8], 49770),
+                ([6,2], 343980),
+                ([4,4], 614250),
+                ([4,2,2], 1474200),
+                ([2,2,2,2], 3538080)
+            ]}
+            for k in self.chern_numbers().keys():
+                ans[k] = self.chern_number(k)
+            return ans
+        else:
+            raise NotImplementedError
+
+    def fujiki_constant(self, p):
+        """
+        Return a single Fujiki constant. Several types of inputs are accepted:
+
+            - A partition / list: returns the Fujiki constant for the corresponding
+              product of Chern classes
+            - A polynomial in Chern classes
+            - A polynomial in Chern classes and a variable named `q`: q will
+              represent the dual of the Beauville-Bogomolov-Fujiki form
+
+        EXAMPLES::
+
+            sage: from bott import hilb_K3, c, td
+            sage: hilb_K3(2).fujiki_constant([2])
+            30
+            sage: hilb_K3(2).fujiki_constant(c[2])
+            30
+            sage: R.<q> = parent(c[2])[]
+            sage: hilb_K3(2).fujiki_constant(c[2] - 6/5*q)
+            0
+
+        TESTS::
+
+            sage: from bott import hilb_K3, kummer
+            sage: hilb_K3(1).fujiki_constant([])
+            1
+            sage: kummer(1).fujiki_constant([])
+            1
+        """
+        if isinstance(p, Partition):
+            return self.fujiki_constants()[p]
+        if isinstance(p, list):
+            return self.fujiki_constants()[list_to_partition(p)]
+        # `is_homogeneous` is broken in Sage if variables are weighted
+        # if not p.is_homogeneous():
+        #     raise ValueError(str(p) + " is not homogeneous")
+        F = self.fujiki_constants()
+        ans = 0
+        R = p.parent()
+        if R.ngens() == 1 and R.variable_name() == 'q':
+            n, typ = dim(self)//2, self.deformation_type
+            assert p.degree() <= n
+            if typ == 'hilb_K3':
+                b = ZZ(22) if n == 1 else ZZ(23)
+            elif typ == 'kummer':
+                b = ZZ(22) if n == 1 else ZZ(7)
+            elif typ == 'OG6':
+                b = ZZ(8)
+            elif typ == 'OG10':
+                b = ZZ(24)
+            for (l, c) in enumerate(list(p)):
+                k = c.degree()
+                assert k//2 + l <= n
+                ans += self.fujiki_constant(c)*prod((b+2*n-k-2*i)/(1+2*n-k-2*i) for i in range(1, l+1))
+            return ans
+        else:
+            for (c, m) in p:
+                q = Partition(exp=m.degrees())
+                ans += c * F[q] if q in F.keys() else 0
+            return ans
+
 @cached_function
-def hilb_K3(n):
+def hilb_K3(n, cached=True):
     """
     Compute the Chern numbers of the Hilbert scheme of n points on a K3
     surface. Return a `CobordismClass` object.
@@ -630,11 +818,15 @@ def hilb_K3(n):
         sage: from bott import hilb_K3
         sage: hilb_K3(0)
         Cobordism Class of dim 0
+        sage: hilb_K3(2) == hilb_K3(2, cached=False)
+        True
     """
-    X = hilb_surface(n, 0, 24)
-    X.__type = "hilb_K3"
-    X.fujiki_constants = MethodType(fujiki_constants, X)
-    X.fujiki_constant  = MethodType(fujiki_constant, X)
+    if 0 < n <= 13 and cached:
+        X = HKCobordismClass(2*n, Cached.K3n[n][0])
+        X.fujiki_constants = MethodType(lambda self: Cached.K3n[n][1], X)
+    else:
+        X = HKCobordismClass(2*n, hilb_surface(n, 0, 24).chern_numbers(), False)
+    X.deformation_type = "hilb_K3"
     return X
 
 def hilb_surface(n, c1c1, c2, base_ring=QQ):
@@ -789,7 +981,7 @@ def chern_character(rank, dim=None, base_ring=QQ):
     return rank + capped_logg(total_chern(rank), dim if dim != None else rank)
 
 @cached_function
-def kummer(n):
+def kummer(n, cached=True):
     """
     Compute the Chern numbers of the generalized Kummer variety of dimension
     2n. Return a `CobordismClass` object.
@@ -806,18 +998,22 @@ def kummer(n):
         sage: from bott import kummer
         sage: kummer(0)
         Cobordism Class of dim 0
+        sage: kummer(2) == kummer(2, cached=False)
+        True
     """
-    P2n = [hilb_P2(k+1).cobordism_class() for k in range(n+1)]
-    g = universal_genus(2*(n+1), twist=1)
-    R = PolynomialRing(g.parent(), 1, "z")
-    z = R.gen()
-    g = by_degree(g, 2*(n+1))
-    K = QQ((2*(n+1)**2, 9)) * by_degree(by_degree(capped_log(R(1)+sum(P2n[k].integral(g[2*(k+1)]) * z**(k+1) for k in range(0, n+1)), n+1), n+1)[n+1].coefficients()[0].coefficients()[0], 2*n)[2*n]
-    PP = [Pn(k+1).cobordism_class() for k in range(2*n)]
-    X = CobordismClass(2*n, compute_sum(K, 2*n, PP))
-    X.__type = "kummer"
-    X.fujiki_constants = MethodType(fujiki_constants, X)
-    X.fujiki_constant  = MethodType(fujiki_constant, X)
+    if 0 < n <= 13 and cached:
+        X = HKCobordismClass(2*n, Cached.Kumn[n][0])
+        X.fujiki_constants = MethodType(lambda self: Cached.Kumn[n][1], X)
+    else:
+        P2n = [hilb_P2(k+1).cobordism_class() for k in range(n+1)]
+        g = universal_genus(2*(n+1), twist=1)
+        R = PolynomialRing(g.parent(), 1, "z")
+        z = R.gen()
+        g = by_degree(g, 2*(n+1))
+        K = QQ((2*(n+1)**2, 9)) * by_degree(by_degree(capped_log(R(1)+sum(P2n[k].integral(g[2*(k+1)]) * z**(k+1) for k in range(0, n+1)), n+1), n+1)[n+1].coefficients()[0].coefficients()[0], 2*n)[2*n]
+        PP = [Pn(k+1).cobordism_class() for k in range(2*n)]
+        X = HKCobordismClass(2*n, compute_sum(K, 2*n, PP))
+    X.deformation_type = "kummer"
     return X
 
 def OG(n):
@@ -831,17 +1027,15 @@ def OG(n):
         Cobordism Class of dim 6
     """
     if n == 6:
-        X = CobordismClass(6, {Partition(p): QQ(v) for (p, v) in [
+        X = HKCobordismClass(6, {Partition(p): QQ(v) for (p, v) in [
             ([6], 1920),
             ([4,2], 7680),
             ([2,2,2], 30720)
         ]})
-        X.__type = "OG6"
-        X.fujiki_constants = MethodType(fujiki_constants, X)
-        X.fujiki_constant  = MethodType(fujiki_constant, X)
+        X.deformation_type = "OG6"
         return X
     elif n == 10:
-        X = CobordismClass(10, {Partition(p): QQ(v) for (p, v) in [
+        X = HKCobordismClass(10, {Partition(p): QQ(v) for (p, v) in [
             ([10], 176904),
             ([8,2], 1791720),
             ([6,4], 5159700),
@@ -850,9 +1044,7 @@ def OG(n):
             ([4,2,2,2], 53071200),
             ([2,2,2,2,2], 127370880)
         ]})
-        X.__type = "OG10"
-        X.fujiki_constants = MethodType(fujiki_constants, X)
-        X.fujiki_constant  = MethodType(fujiki_constant, X)
+        X.deformation_type = "OG10"
         return X
     else:
         raise ValueError("Use OG(6) and OG(10) for O'Grady examples")
@@ -907,183 +1099,6 @@ def to_P1xP1k(L, k):
                             ws.append(l + i*(w[0][k0]-w[0][k0+1]) + j*(w[1][k1]-w[1][k1+1]))
         return ws
     return TnBundle(P1xP1k, k*rank(L), loc)
-
-# these are manually added to the hyperkähler ones as methods
-@cached_method
-def fujiki_constants(self):
-    """
-    Return the Fujiki constants of Chern classes on a hyperkähler manifold.
-
-    EXAMPLES::
-
-        sage: from bott import hilb_K3, kummer
-        sage: print(hilb_K3(2).fujiki_constants())
-        {[]: 3, [2]: 30, [4]: 324, [2, 2]: 828}
-        sage: print(kummer(2).fujiki_constants())
-        {[]: 9, [2]: 54, [4]: 108, [2, 2]: 756}
-    """
-    n, typ = dim(self)//2, self.__type
-    if typ == "hilb_K3":
-        g = universal_genus(2*n)
-        Omega = parent(g).base_ring()
-        P = [Omega(0)] + list(Omega.gens())
-        Rt = PolynomialRing(Omega, "t")
-        t = Rt.gen()
-        A, B = Rt(1), Rt(1)
-        for k in range(1, n+1):
-            R = PolynomialRing(Omega, 2*k+1, ["c"+str(i+1) for i in range(2*k)] + ["E"], order=TermOrder("wdeglex", list(range(1, 2*k+1)) + [1]))
-            gk = universal_genus(2*k)
-            c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
-            # pick a random weight w
-            Ok = to_P2k(Pn(2, w=[0,12,1321]).O(), k)
-            P2k = Ok.parent
-            A += t**k * P2k.integrals([P2k.T, Ok], c)
-            # pick random weights w
-            Ok = to_P1xP1k((Pn(1, w=[0,121]) * Pn(1, w=[0,213])).O(), k)
-            P1xP1k = Ok.parent
-            B += t**k * P1xP1k.integrals([P1xP1k.T, Ok], c)
-        C = capped_exp(-16 * capped_log(A, n) + 18 * capped_log(B, n), n)
-        Cn = by_degree(C.monomial_coefficient(t**n), 2*n)
-        c = [0] + list(parent(g).gens())
-        ans = {}
-        coeffs_in_Pn = lambda x, m: [x.monomial_coefficient(Omega(prod(P[k] for k in p))) for p in Partitions(m)]
-        for m in range(0, n+1):
-            M = matrix([coeffs_in_Pn(g.monomial_coefficient(g.parent(prod(c[2*k] for k in p))), 2*m) for p in Partitions(m)])
-            coeffs = M.solve_left(vector(coeffs_in_Pn(Cn[2*m], 2*m)))
-            for (q, v) in zip(Partitions(m), coeffs):
-                q = Partition([2*qi for qi in q])
-                if m == 0 and n == 1:
-                    ans[q] = QQ(1)
-                else:
-                    ans[q] = v * factorial(2*(n-m)) / (2-2*n)**(n-m)
-        return ans
-    elif typ == "kummer":
-        g = universal_genus(2*(n+1))
-        Omega = parent(g).base_ring()
-        P = [Omega(0)] + list(Omega.gens())
-        Rt = PolynomialRing(Omega, "t")
-        t = Rt.gen()
-        Ap, Am, A = Rt(1), Rt(1), Rt(1)
-        for k in range(1, n+2):
-            R = PolynomialRing(Omega, 2*k+1, ["c"+str(i+1) for i in range(2*k)] + ["E"], order=TermOrder("wdeglex", list(range(1, 2*k+1)) + [1]))
-            # pick a random weight w
-            Ok = to_P2k(Pn(2, w=[0,12,1321]).O(), k)
-            P2k = Ok.parent
-            gk = universal_genus(2*k, twist=1)
-            c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
-            Ap += t**k * P2k.integrals([P2k.T, Ok], c)
-            gk = universal_genus(2*k, twist=-1)
-            c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
-            Am += t**k * P2k.integrals([P2k.T, Ok], c)
-            gk = universal_genus(2*k)
-            c = hom(parent(gk), R, R.gens()[:-1])(gk) * capped_exp(R.gens()[-1], 2*k)
-            A += t**k * P2k.integrals([P2k.T, Ok], c)
-        K = QQ(((n+1)**2, 9)) * by_degree(capped_log(Ap, n+1) + capped_log(Am, n+1) - 2*capped_log(A, n+1), n+1)[n+1].coefficients()[0]
-        Kn = by_degree(K, 2*n)
-        c = [0] + list(parent(g).gens())
-        ans = {}
-        coeffs_in_Pn = lambda x, m: [x.monomial_coefficient(Omega(prod(P[k] for k in p))) for p in Partitions(m)]
-        for m in range(0, n+1):
-            M = matrix([coeffs_in_Pn(g.monomial_coefficient(g.parent(prod(c[2*k] for k in p))), 2*m) for p in Partitions(m)])
-            coeffs = M.solve_left(vector(coeffs_in_Pn(Kn[2*m], 2*m)))
-            for (q, v) in zip(Partitions(m), coeffs):
-                q = Partition([2*qi for qi in q])
-                if m == 0 and n == 1:
-                    ans[q] = QQ(1)
-                else:
-                    ans[q] = v * factorial(2*(n-m)) / (-2-2*n)**(n-m)
-        return ans
-    elif typ == "OG6":
-        ans = {Partition(p): QQ(v) for (p, v) in [
-            ([], 60),
-            ([2], 288),
-            ([4], 480),
-            ([2,2], 1920)
-        ]}
-        for k in self.chern_numbers().keys():
-            ans[k] = self.chern_number(k)
-        return ans
-    elif typ == "OG10":
-        ans = {Partition(p): QQ(v) for (p, v) in [
-            ([], 945),
-            ([2], 5040),
-            ([4], 13500),
-            ([2,2], 32400),
-            ([6], 26460),
-            ([4,2], 113400),
-            ([2,2,2], 272160),
-            ([8], 49770),
-            ([6,2], 343980),
-            ([4,4], 614250),
-            ([4,2,2], 1474200),
-            ([2,2,2,2], 3538080)
-        ]}
-        for k in self.chern_numbers().keys():
-            ans[k] = self.chern_number(k)
-        return ans
-    else:
-        raise NotImplementedError
-
-def fujiki_constant(self, p):
-    """
-    Return a single Fujiki constant. Several types of inputs are accepted:
-
-        - A partition / list: returns the Fujiki constant for the corresponding
-          product of Chern classes
-        - A polynomial in Chern classes
-        - A polynomial in Chern classes and a variable named `q`: q will
-          represent the dual of the Beauville-Bogomolov-Fujiki form
-
-    EXAMPLES::
-
-        sage: from bott import hilb_K3, c, td
-        sage: hilb_K3(2).fujiki_constant([2])
-        30
-        sage: hilb_K3(2).fujiki_constant(c[2])
-        30
-        sage: R.<q> = parent(c[2])[]
-        sage: hilb_K3(2).fujiki_constant(c[2] - 6/5*q)
-        0
-
-    TESTS::
-
-        sage: from bott import hilb_K3, kummer
-        sage: hilb_K3(1).fujiki_constant([])
-        1
-        sage: kummer(1).fujiki_constant([])
-        1
-    """
-    if isinstance(p, Partition):
-        return self.fujiki_constants()[p]
-    if isinstance(p, list):
-        return self.fujiki_constants()[list_to_partition(p)]
-    # `is_homogeneous` is broken in Sage if variables are weighted
-    # if not p.is_homogeneous():
-    #     raise ValueError(str(p) + " is not homogeneous")
-    F = self.fujiki_constants()
-    ans = 0
-    R = p.parent()
-    if R.ngens() == 1 and R.variable_name() == 'q':
-        n, typ = dim(self)//2, self.__type
-        assert p.degree() <= n
-        if typ == 'hilb_K3':
-            b = ZZ(22) if n == 1 else ZZ(23)
-        elif typ == 'kummer':
-            b = ZZ(22) if n == 1 else ZZ(7)
-        elif typ == 'OG6':
-            b = ZZ(8)
-        elif typ == 'OG10':
-            b = ZZ(24)
-        for (l, c) in enumerate(list(p)):
-            k = c.degree()
-            assert k//2 + l <= n
-            ans += self.fujiki_constant(c)*prod((b+2*n-k-2*i)/(1+2*n-k-2*i) for i in range(1, l+1))
-        return ans
-    else:
-        for (c, m) in p:
-            q = Partition(exp=m.degrees())
-            ans += c * F[q] if q in F.keys() else 0
-        return ans
 
 def riemann_roch_polynomial(X, alpha=1, base_ring=QQ):
     """

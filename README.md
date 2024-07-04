@@ -26,7 +26,7 @@ sage: hilb_K3(2).integral(sqrt_todd(4))
 ```
 
 ## Installation
-Run `sage --python setup.py install --user` in the root directory where the file `setup.py` is.
+Run `sage --pip install . --user` in the root directory where the file `setup.py` is.
 
 Note that `cython` and `gmpy2` are needed for the package to build. They are usually already available if you have Sage installed.
 
